@@ -9,4 +9,6 @@ arm_speed = 0.4
 vit_thresh = 0.1
 gpt_model = "gpt-4o"
 gpt_temp = 0.2
-tower = ["dark blue block","green block","yellow block", "red block"]
+# tower = ["blue block","green block","yellow block", "red block"]
+collect_data = True
+tower = ["red block", "blue block"]

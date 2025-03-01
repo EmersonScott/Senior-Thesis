@@ -126,7 +126,7 @@ The output should be a JSON object where each key is an integer indicating an or
                      
                      """)
     
-    user_prompt = f"Give me the next step so the blocks are stacked with the {str_list_stack_order[0]} at the base of the tower"
+    user_prompt = f"Give me the next step so the blocks are stacked with the {str_list_stack_order[0]} at the base of the tower" # TODO: UPDATE GOAL PROMPT
     for i in range(1, len(str_list_stack_order)):
         user_prompt += f"\nthe {str_list_stack_order[i]} on the {str_list_stack_order[i-1]}"
     user_prompt += "."
@@ -145,8 +145,6 @@ The output should be a JSON object where each key is an integer indicating an or
         user_prompt += "before you took your last action your plan was to next:\n"
         for i, action in previous_plan:
             user_prompt += f"   {action}\n"
-
-    
 
     return system_prompt, user_prompt
 
@@ -246,7 +244,9 @@ if __name__ == "__main__":
     
 
     ##--string for GPT QUERY--##
-    tower = ["green block", "blue block", "yellow block"]
+    # tower = ["green block", "blue block", "yellow block"]
+    # tower = ["purple block","blue block" "green block","yellow block"]
+    tower = []
     action_history = []
     previous_plan = []
     for i in range(2):
