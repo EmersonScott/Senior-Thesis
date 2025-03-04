@@ -167,6 +167,7 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
     image = encode_image(rgb_image)
     img_type = "image/jpeg"
 
+    # STATE INTERPRETER
     state_querry_system_prompt, state_querry_user_prompt = get_state_querry_prompt()
     #print(f"{state_querry_system_prompt=}")
     #print()
@@ -187,15 +188,15 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
         response_format={"type": "json_object"},
         temperature=gpt_temp
     )
-    state_json = json.loads(state_response.choices[0].message.content)
-    instruction_system_prompt, instruction_user_prompt = get_instruction_prompt(desired_tower_order, state_json, action_history, previous_plan)
+    state_json = json.loads(state_response.choices[0].message.content) # extract JSON from reposnse and convert to python dictionary
+    instruction_system_prompt, instruction_user_prompt = get_instruction_prompt(desired_tower_order, state_json, action_history, previous_plan) # generate the instruction prompt USING THE STATE
     #print(f"{instruction_system_prompt=}")
     #print()
     #print(f"{instruction_user_prompt}")
     #print()
     #print(f"{instruction_assitant_prompt=}")
 
-
+    # INSTRUCTION GENERATION
     instruction_response = client.chat.completions.create(
         model=gpt_model,
         messages=[
@@ -206,10 +207,10 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
         response_format={"type": "json_object"},
         temperature=gpt_temp
     )
-    instruction_json = json.loads(instruction_response.choices[0].message.content)
-    min_key = min(instruction_json.keys(), key=lambda x: int(x))
-    next_instruction_json = instruction_json.pop(min_key)
-    future_instructions_json = [(k,v) for k, v in sorted(instruction_json.items(), key=lambda item: item[0])]
+    instruction_json = json.loads(instruction_response.choices[0].message.content) # extract JSON from reposnse and convert to python dictionary
+    min_key = min(instruction_json.keys(), key=lambda x: int(x))                   # find and store the next instruction (lowest key)
+    next_instruction_json = instruction_json.pop(min_key)                          # remove the next instruction from the dictionary
+    future_instructions_json = [(k,v) for k, v in sorted(instruction_json.items(), key=lambda item: item[0])] # store the remaining instructions by key (ordered)
     return (state_response, state_json, state_querry_system_prompt, state_querry_user_prompt), (instruction_response, next_instruction_json, future_instructions_json, instruction_system_prompt, instruction_user_prompt)
     
 def print_json(j, name=""):
@@ -245,7 +246,6 @@ if __name__ == "__main__":
 
     ##--string for GPT QUERY--##
     # tower = ["green block", "blue block", "yellow block"]
-    # tower = ["purple block","blue block" "green block","yellow block"]
     tower = []
     action_history = []
     previous_plan = []
