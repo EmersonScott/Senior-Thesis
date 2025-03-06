@@ -71,7 +71,12 @@ class observation:
             queries = [self.str_label]
             abbrevq = [self.str_label]
             bbox = label_vit.label(rgb_img, queries[0], abbrevq[0], plot=False, topk=True)
+
+            if len(bbox[1]) == 0: # Better handles no object detected
+                assert False, "No object detected"
+
             bbox = bbox[1][0].tolist()
+
         self.xmin = int(bbox[0])
         self.ymin = int(bbox[1])
         self.xmax = int(bbox[2])
