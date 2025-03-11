@@ -3,7 +3,7 @@ import json
 from PIL import Image
 import base64
 import io
-
+import re
 #Function that takes a list of blocks in order of the tower [red, green, blue] and produces a prompt to be given to the GPT4o in sideview
 #https://platform.openai.com/docs/guides/structured-outputs/examples
 def get_state_querry_prompt():
@@ -123,10 +123,11 @@ The output should be a JSON object where each key is an integer indicating an or
 - **If no steps are required because the desired configuration is already met, entry `0` should reflect that the tower is complete, and the `done` status should be `true`.
 - **Pick and place strings should be concise nouns
 - **DO NOT PLACE THINGS ON THE TABLE THAT ARE ALREADY ON THE TABLE
+- **Always include the DONE field
                      
                      """)
     
-    user_prompt = f"Give me the next step so the blocks are stacked with the {str_list_stack_order[0]} at the base of the tower" # TODO: UPDATE GOAL PROMPT
+    user_prompt = f"Give me the next step so the blocks are stacked with the {str_list_stack_order[0]} at the base of the tower"
     for i in range(1, len(str_list_stack_order)):
         user_prompt += f"\nthe {str_list_stack_order[i]} on the {str_list_stack_order[i-1]}"
     user_prompt += "."
@@ -148,6 +149,48 @@ The output should be a JSON object where each key is an integer indicating an or
 
     return system_prompt, user_prompt
 
+def get_basic_prompt(obj_and_relationships, end_tower_list):
+    """
+    Constructs a string prompt for a language model (LLM) to determine the next best move 
+    to transition from the start state to the end state in a block world scenario.
+
+    Args:
+        start_state (dict): A dictionary representing the initial positions of blocks. 
+                            Keys are block names, and values are their placements.
+        end_state (dict): A dictionary representing the desired final positions of blocks. 
+                          Keys are block names, and values are their placements.
+
+    Returns:
+        str: A formatted string prompt describing the start state, the desired end state, 
+             and a json for the next best move to transition from the start state to the end state.
+             the json should have fields 
+    """
+
+    start_state = {relationship[0]: relationship[1] for relationship in obj_and_relationships["object_relationships"]}
+    end_state = {end_tower_list[i+1]: end_tower_list[i] for i in range(len(end_tower_list)-1)}
+    print(f"{start_state=}")
+    print(f"{end_state=}")
+    # Construct string prompt for an LLM
+    prompt = f"""\nGiven the start state:\n"""
+    for block, placement in start_state.items():
+        prompt += f"   {block} is on {placement}\n"
+    prompt+="\n"
+    prompt += """and desired end state:\n"""
+    for block, placement in end_state.items():
+        prompt += f"   {block} is on {placement}\n"
+    prompt+= "\n"
+    prompt +="""what is the next best move to get us closer to the end state from the start state? Your answer needs to have two parts on two seperate lines.
+   pick: *object to be picked up*
+   place: *object to put the picked object on*
+
+if there is no block to move please have
+   pick: None
+   place: None
+    """
+    print(f"{prompt=}")
+    return prompt
+
+
 #helper function that formats the image for GPT api
 def encode_image(img_array):
     # Convert the ndarray to a PIL Image
@@ -167,7 +210,6 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
     image = encode_image(rgb_image)
     img_type = "image/jpeg"
 
-    # STATE INTERPRETER
     state_querry_system_prompt, state_querry_user_prompt = get_state_querry_prompt()
     #print(f"{state_querry_system_prompt=}")
     #print()
@@ -188,29 +230,48 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
         response_format={"type": "json_object"},
         temperature=gpt_temp
     )
-    state_json = json.loads(state_response.choices[0].message.content) # extract JSON from reposnse and convert to python dictionary
-    instruction_system_prompt, instruction_user_prompt = get_instruction_prompt(desired_tower_order, state_json, action_history, previous_plan) # generate the instruction prompt USING THE STATE
+    state_json = json.loads(state_response.choices[0].message.content)
+    #instruction_system_prompt, instruction_user_prompt = get_instruction_prompt(desired_tower_order, state_json, action_history, previous_plan)
+    instruction_user_prompt = get_basic_prompt(state_json, desired_tower_order)
     #print(f"{instruction_system_prompt=}")
     #print()
     #print(f"{instruction_user_prompt}")
     #print()
     #print(f"{instruction_assitant_prompt=}")
 
-    # INSTRUCTION GENERATION
+
     instruction_response = client.chat.completions.create(
         model=gpt_model,
         messages=[
-            { "role": "system", "content":[{"type": "text", "text":f"{instruction_system_prompt}"}]},
+            #{ "role": "system", "content":[{"type": "text", "text":f"{instruction_system_prompt}"}]},
             #{ "role": "assistant", "content":[{"type": "text", "text":f"{instruction_assitant_prompt}"}]},
             { "role": "user", "content":[{"type": "text", "text":f"{instruction_user_prompt}"}]}
         ],
-        response_format={"type": "json_object"},
+        response_format={"type": "text"},
         temperature=gpt_temp
     )
-    instruction_json = json.loads(instruction_response.choices[0].message.content) # extract JSON from reposnse and convert to python dictionary
-    min_key = min(instruction_json.keys(), key=lambda x: int(x))                   # find and store the next instruction (lowest key)
-    next_instruction_json = instruction_json.pop(min_key)                          # remove the next instruction from the dictionary
-    future_instructions_json = [(k,v) for k, v in sorted(instruction_json.items(), key=lambda item: item[0])] # store the remaining instructions by key (ordered)
+    instruction_response = instruction_response.choices[0].message.content
+    pattern = r"pick:\s*(.*)\s*place:\s*(.*)"
+    match = re.search(pattern, instruction_response)
+    pick = match.group(1).strip()
+    place = match.group(2).strip()
+    
+    # Determine the value of done
+    done = 0 if pick != "None" or place != "None" else 1
+    
+    # Create the JSON object
+    instruction_json = {
+        "pick": pick,
+        "place": place,
+        "done": done
+    }
+
+    #min_key = min(instruction_json.keys(), key=lambda x: int(x))
+    #next_instruction_json = instruction_json.pop(min_key)
+    #future_instructions_json = [(k,v) for k, v in sorted(instruction_json.items(), key=lambda item: item[0])]
+    next_instruction_json = instruction_json
+    future_instructions_json = None
+    instruction_system_prompt = None
     return (state_response, state_json, state_querry_system_prompt, state_querry_user_prompt), (instruction_response, next_instruction_json, future_instructions_json, instruction_system_prompt, instruction_user_prompt)
     
 def print_json(j, name=""):
@@ -220,7 +281,7 @@ def print_json(j, name=""):
 
 
 if __name__ == "__main__":
-    from APIKeys import API_KEY
+    from FoundationModelBlockStacking.APIKeys import API_KEY
     from control_scripts import goto_vec, get_pictures
     from magpie_control import realsense_wrapper as real
     from magpie_control.ur5 import UR5_Interface as robot
@@ -245,8 +306,7 @@ if __name__ == "__main__":
     
 
     ##--string for GPT QUERY--##
-    # tower = ["green block", "blue block", "yellow block"]
-    tower = []
+    tower = ["green block", "blue block", "yellow block"]
     action_history = []
     previous_plan = []
     for i in range(2):

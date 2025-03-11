@@ -1,4 +1,6 @@
 Miniconda3-latest-Linux-x86_64.sh
+__pycache__
 secrets
 APIKeys.py
 data_collection
+OLDFoundationModelBlockStackingOLD
