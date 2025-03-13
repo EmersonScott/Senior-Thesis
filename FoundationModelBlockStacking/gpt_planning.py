@@ -170,15 +170,20 @@ def get_basic_prompt(obj_and_relationships, end_tower_list):
     end_state = {end_tower_list[i+1]: end_tower_list[i] for i in range(len(end_tower_list)-1)}
     print(f"{start_state=}")
     print(f"{end_state=}")
+
     # Construct string prompt for an LLM
     prompt = f"""\nGiven the start state:\n"""
     for block, placement in start_state.items():
         prompt += f"   {block} is on {placement}\n"
+
     prompt+="\n"
+
     prompt += """and desired end state:\n"""
     for block, placement in end_state.items():
         prompt += f"   {block} is on {placement}\n"
+
     prompt+= "\n"
+
     prompt +="""what is the next best move to get us closer to the end state from the start state? Your answer needs to have two parts on two seperate lines.
    pick: *object to be picked up*
    place: *object to put the picked object on*
@@ -187,6 +192,7 @@ if there is no block to move please have
    pick: None
    place: None
     """
+    
     print(f"{prompt=}")
     return prompt
 
@@ -210,6 +216,7 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
     image = encode_image(rgb_image)
     img_type = "image/jpeg"
 
+    # STATE INTERPRETER
     state_querry_system_prompt, state_querry_user_prompt = get_state_querry_prompt()
     #print(f"{state_querry_system_prompt=}")
     #print()
@@ -230,9 +237,9 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
         response_format={"type": "json_object"},
         temperature=gpt_temp
     )
-    state_json = json.loads(state_response.choices[0].message.content)
+    state_json = json.loads(state_response.choices[0].message.content) # extract JSON from reposnse and convert to python dictionary
     #instruction_system_prompt, instruction_user_prompt = get_instruction_prompt(desired_tower_order, state_json, action_history, previous_plan)
-    instruction_user_prompt = get_basic_prompt(state_json, desired_tower_order)
+    instruction_user_prompt = get_basic_prompt(state_json, desired_tower_order) # new prompt call, instruction_system_prompt no longer used
     #print(f"{instruction_system_prompt=}")
     #print()
     #print(f"{instruction_user_prompt}")
