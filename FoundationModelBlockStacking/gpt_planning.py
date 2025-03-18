@@ -83,71 +83,16 @@ Make sure the output JSON adheres strictly to the specified structure and valida
     user_prompt = f"Give me the state in the given image"
     return system_prompt, user_prompt
 
-def get_instruction_prompt(str_list_stack_order, state_obj, action_history, previous_plan):
-    system_prompt = ("""
-Generate specific instructions to achieve a desired tower stack configuration using a forward planning approach, adding a chain of thought reasoning for each step.
-
-Your role is to act as a block-stacking planner who creates detailed sequential steps to build/modify a tower. The provided current state of the tower may vary, including situations where the tower is partially or incorrectly built. If the tower is already correctly configured, your first entry (entry `0`) should indicate no action is needed and mark the task as done.
-
-# Details
-
-- The plan should be informed by the user-provided **current state** of the tower.
-- Use **forward planning**, breaking down how each move helps approach the final goal in a logical manner.
-
-# Steps
-
-- **Step-by-Step Chain of Thought**: Provide a thorough explanation of why each action is being taken and how it logically contributes to achieving the correct tower configuration.
-
-- **Forward Reasoning Approach**:
-    1. Identify the **current state** and determine the immediate discrepancies versus the **desired order**.
-    2. Formulate practical steps, describing why each block needs to be moved, how it enables the next action, and how it advances toward the completion.
-    3. Include each planned **pick** and **place** operation and the logical order they should follow, with reasoning detailed before each action.
-
-# Output Format
-
-The output should be a JSON object where each key is an integer indicating an order of execution, and the corresponding value is a JSON object detailing:
-- **current state**: (string) explains what the current state is
-- **done**: (boolean) indicates whether all conditions of the desired order are fulfilled.
-- **explanation**: (string) explains the reasoning behind the action taken.
-- **pick**: (string) specifies the block being picked in the current action.
-- **place**: (string) specifies where the block is being placed.
-- **end state**: (string) explains what the state should be after execution
-
-
-# Notes
-
-- The **done** field is updated only once the final desired configuration is achieved. It is set only in the step where the tower is complete.
-- **Avoid Unnecessary Actions**: Refrain from moving blocks to intermediate places (like the table) unless required to access another needed block.
-- **Sequence Consistency**: Always begin with entry `0` and incrementally proceed (`0`, `1`, `2`, `3`, etc.) without skipping entries.
-- **Post-Completion Check**: Conduct a final check to ensure that the configuration matches the desired state before concluding the task.
-- **If no steps are required because the desired configuration is already met, entry `0` should reflect that the tower is complete, and the `done` status should be `true`.
-- **Pick and place strings should be concise nouns
-- **DO NOT PLACE THINGS ON THE TABLE THAT ARE ALREADY ON THE TABLE
-- **Always include the DONE field
-                     
+def get_task_initerpretation_prompt():
+    user_prompt = ("""
+You are a 6 DoF UR5 robot arm equipped with a traditional gripper, with pick and place capabilities.\n
+Based on the contents you see in front of you (see image), as seen through a camera in your gripper, what general task might you most likely be intended to perform?\n
+If intentions are unclear but you see a task that you are equipped to complete that might be helpful to the user anyway, return that.\n
+If no meaningful tasks stand out, return ‘No meaningful tasks detected.’\n
+Make sure to return exactly one definitive task - if multiple options are equally viable, choose one at random.\n
+Makes sure the response is as concise as possible, as it will be received by another task planning LLM for further processing and execution.
                      """)
-    
-    user_prompt = f"Give me the next step so the blocks are stacked with the {str_list_stack_order[0]} at the base of the tower"
-    for i in range(1, len(str_list_stack_order)):
-        user_prompt += f"\nthe {str_list_stack_order[i]} on the {str_list_stack_order[i-1]}"
-    user_prompt += "."
-
-    user_prompt += "The objects are currently stacked as follows:\n"
-    for i in range(0,len(state_obj["object_relationships"])):
-        user_prompt += f"   {state_obj['object_relationships'][i][0]} is on top of {state_obj['object_relationships'][i][1]}.\n"
-
-    user_prompt +="\n"
-    if len(action_history) > 0:
-        user_prompt += "up until this point the actions you took in order were:\n"
-        for i, action in enumerate(action_history):
-            user_prompt += f"   {action}\n"
-    
-    if len(previous_plan) > 0:
-        user_prompt += "before you took your last action your plan was to next:\n"
-        for i, action in previous_plan:
-            user_prompt += f"   {action}\n"
-
-    return system_prompt, user_prompt
+    return user_prompt
 
 def get_basic_prompt(obj_and_relationships, end_tower_list):
     """
@@ -211,10 +156,38 @@ def encode_image(img_array):
     
     return encoded_string
 
+
+def get_task_interpretation(client, rgb_image):
+    image = encode_image(rgb_image)
+    img_type = "image/jpeg"
+
+    # TASK INTERPRETER
+    task_interpretation_prompt = get_task_initerpretation_prompt()
+
+    task_interpretation_response = client.chat.completions.create(
+        model=gpt_model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": task_interpretation_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{img_type};base64,{encode_image(rgb_image)}"}}
+                ]
+            },
+        ],
+        response_format={"type": "text"},
+        temperature=gpt_temp
+    )
+    task_interpretation = task_interpretation_response.choices[0].message.content
+    print("TASK INTERPRETATION:", task_interpretation)
+    return task_interpretation
+
+
 #api calling function
 def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_history, previous_plan):
     image = encode_image(rgb_image)
     img_type = "image/jpeg"
+
 
     # STATE INTERPRETER
     state_querry_system_prompt, state_querry_user_prompt = get_state_querry_prompt()
@@ -239,14 +212,15 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
     )
     state_json = json.loads(state_response.choices[0].message.content) # extract JSON from reposnse and convert to python dictionary
     #instruction_system_prompt, instruction_user_prompt = get_instruction_prompt(desired_tower_order, state_json, action_history, previous_plan)
+
+
+    # INSTRUCTION GENERATOR
     instruction_user_prompt = get_basic_prompt(state_json, desired_tower_order) # new prompt call, instruction_system_prompt no longer used
     #print(f"{instruction_system_prompt=}")
     #print()
     #print(f"{instruction_user_prompt}")
     #print()
     #print(f"{instruction_assitant_prompt=}")
-
-
     instruction_response = client.chat.completions.create(
         model=gpt_model,
         messages=[
@@ -262,6 +236,7 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
     match = re.search(pattern, instruction_response)
     pick = match.group(1).strip()
     place = match.group(2).strip()
+
     
     # Determine the value of done
     done = 0 if pick != "None" or place != "None" else 1
