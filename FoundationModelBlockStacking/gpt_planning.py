@@ -8,13 +8,13 @@ import re
 #https://platform.openai.com/docs/guides/structured-outputs/examples
 def get_state_querry_prompt():
     system_prompt = ("""
-You are a block stacking robot. Your task is to analyze the scene, determine the objects present, and infer their relationships through detailed chain of thought reasoning.
+You are a a 6 DoF robot with basic pick and place capabilities. Your task is to analyze the scene, determine the objects present, and infer their relationships through detailed chain of thought reasoning.
 
 # Instructions
 
 You should output a JSON object containing the following fields:
 
-- **objects**: A list of all objects visible in the scene that are relevant to the block stacking task. Make sure to include the table as one of the objects.
+- **objects**: A list of all objects visible in the scene that are relevant to a pick and place task. Make sure to include the table as one of the objects.
   
 - **object_relationships**: A list of tuples describing relationships between the objects. Each tuple should be in the format `<OBJECT1, OBJECT2>`, where `OBJECT1` is directly on top of `OBJECT2`. Include relationships where the objects are directly on the table. Do not include transitive relationships; for example, if block A is on block B and block B is on the table, do not state that block A is on the table.
 
@@ -22,10 +22,10 @@ Ensure that every object is on at least one other object or the table. No object
 
 # Chain of Thought Reasoning
 
-1. **Identify Objects**: Begin by analyzing the scene to identify all visible objects relevant to the block stacking task. This includes blocks and the table itself.
+1. **Identify Objects**: Begin by analyzing the scene to identify all visible objects relevant to the pick and place task. This includes objects and the table itself.
   
 2. **Determine Object Positions**: For each object, determine its placement in relation to other objects:
-   - Is the object on another block or on the table?
+   - Is the object on another object or on the table?
    - Make sure no object is left unplaced.
 
 3. **Establish Relationships**: Once object positions are determined, establish relationships following these rules:
@@ -41,8 +41,8 @@ Your output should be formatted as a JSON object, like the example below:
 
 ```json
 {
-  "objects": ["table", "block A", "block B", "block C"],
-  "object_relationships": [["block A", "block B"], ["block B", "table"], ["block C", "table"]]
+  "objects": ["table", "object A", "object B", "object C"],
+  "object_relationships": [["object A", "object B"], ["object B", "table"], ["object C", "table"]]
 }
 ```
 
@@ -51,26 +51,26 @@ Make sure the output JSON adheres strictly to the specified structure and valida
 # Examples
 
 **Input Scene Description**:
-- Block A is on Block B.
-- Block B is on the table.
-- Block C is also on the table.
+- object A is on object B.
+- object B is on the table.
+- object C is also on the table.
 
 **Chain of Thought Reasoning**:
-1. Identify Objects: The scene includes "Block A", "Block B", "Block C", and the "table".
+1. Identify Objects: The scene includes "Object A", "Object B", "Object C", and the "table".
 2. Determine Object Positions:
-   - Block A is on Block B.
-   - Block B is on the table.
-   - Block C is on the table.
+   - Object A is on Object B.
+   - Object B is on the table.
+   - Object C is on the table.
 3. Establish Relationships:
-   - `<Block A, Block B>`
-   - `<Block B, Table>`
-   - `<Block C, Table>`
+   - `<Object A, Object B>`
+   - `<Object B, Table>`
+   - `<Object C, Table>`
 
 **Output JSON**:
 ```json
 {
-  "objects": ["table", "block A", "block B", "block C"],
-  "object_relationships": [["block A", "block B"], ["block B", "table"], ["block C", "table"]]
+  "objects": ["table", "Object A", "Object B", "Object C"],
+  "object_relationships": [["Object A", "Object B"], ["Object B", "table"], ["Object C", "table"]]
 }
 ```
 
@@ -94,7 +94,7 @@ Makes sure the response is as concise as possible, as it will be received by ano
                      """)
     return user_prompt
 
-def get_basic_prompt(obj_and_relationships, end_tower_list):
+def get_basic_prompt(obj_and_relationships, task_interpretation):
     """
     Constructs a string prompt for a language model (LLM) to determine the next best move 
     to transition from the start state to the end state in a block world scenario.
@@ -112,28 +112,34 @@ def get_basic_prompt(obj_and_relationships, end_tower_list):
     """
 
     start_state = {relationship[0]: relationship[1] for relationship in obj_and_relationships["object_relationships"]}
-    end_state = {end_tower_list[i+1]: end_tower_list[i] for i in range(len(end_tower_list)-1)}
+    # end_state = {end_tower_list[i+1]: end_tower_list[i] for i in range(len(end_tower_list)-1)}
     print(f"{start_state=}")
-    print(f"{end_state=}")
+    # print(f"{end_state=}")
 
     # Construct string prompt for an LLM
-    prompt = f"""\nGiven the start state:\n"""
+    prompt = f"""\nYour task is to\n"""
+    prompt += f"{task_interpretation}\n"
+
+    prompt += f"""\nGiven the current state:\n"""
     for block, placement in start_state.items():
         prompt += f"   {block} is on {placement}\n"
 
     prompt+="\n"
 
-    prompt += """and desired end state:\n"""
-    for block, placement in end_state.items():
-        prompt += f"   {block} is on {placement}\n"
+    # prompt += """and desired end state:\n"""
+    # for block, placement in end_state.items():
+    #     prompt += f"   {block} is on {placement}\n"
 
-    prompt+= "\n"
+    # prompt+= "\n"
 
-    prompt +="""what is the next best move to get us closer to the end state from the start state? Your answer needs to have two parts on two seperate lines.
+    prompt +="""what is the next best move (single pick and place operation) to get us closer to completing the task from the start state?
+    The place location can be another object (prefered), or a defined region on the table if one exists, e.g. 'blue square'.
+    Your answer needs to have two parts on two seperate lines.
+
    pick: *object to be picked up*
-   place: *object to put the picked object on*
+   place: *object or location to put the picked object on*
 
-if there is no block to move please have
+if there is no object to move please have
    pick: None
    place: None
     """
@@ -157,8 +163,7 @@ def encode_image(img_array):
     return encoded_string
 
 
-def get_task_interpretation(client, rgb_image):
-    image = encode_image(rgb_image)
+def get_task_interpretation(client, rgb_image1, rgb_image2):
     img_type = "image/jpeg"
 
     # TASK INTERPRETER
@@ -171,7 +176,8 @@ def get_task_interpretation(client, rgb_image):
                 "role": "user",
                 "content": [
                     {"type": "text", "text": task_interpretation_prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:{img_type};base64,{encode_image(rgb_image)}"}}
+                    {"type": "image_url", "image_url": {"url": f"data:{img_type};base64,{encode_image(rgb_image1)}"}},
+                    {"type": "image_url", "image_url": {"url": f"data:{img_type};base64,{encode_image(rgb_image2)}"}}
                 ]
             },
         ],
@@ -184,7 +190,7 @@ def get_task_interpretation(client, rgb_image):
 
 
 #api calling function
-def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_history, previous_plan):
+def get_gpt_next_instruction(client, rgb_image, task_interpretation, action_history, previous_plan):
     image = encode_image(rgb_image)
     img_type = "image/jpeg"
 
@@ -215,7 +221,7 @@ def get_gpt_next_instruction(client, rgb_image, desired_tower_order, action_hist
 
 
     # INSTRUCTION GENERATOR
-    instruction_user_prompt = get_basic_prompt(state_json, desired_tower_order) # new prompt call, instruction_system_prompt no longer used
+    instruction_user_prompt = get_basic_prompt(state_json, task_interpretation) # new prompt call, instruction_system_prompt no longer used
     #print(f"{instruction_system_prompt=}")
     #print()
     #print(f"{instruction_user_prompt}")
